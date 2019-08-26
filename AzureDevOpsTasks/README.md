@@ -30,7 +30,7 @@ Note: MM.dd is a date format of currentDay-
 Run devops.ps1 script.
 The algorithm
 1) Load scripts from api folder
-2) Finds 3-day old build definition and deletes all builds except last successful build
+2) Finds 3-day old build definitions and deletes all builds in them except last successful build
 3) Create branch named release-MM.dd format from master branch
 4) Create policy settings like minimum reviewers count and merge strategy settings
 5) find build definition named [P][Master][CI] or [P][Master][PR] or [P][Master][Validation] and clone them to [P][Master][MM.dd][CI], [P][Master][MM.dd][PR], [P][Master][MM.dd][Validation] named new build definitions(related to new branch) in postfix(MM.dd) folder
