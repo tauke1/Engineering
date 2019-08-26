@@ -53,5 +53,5 @@ variables:
       Write-Host "Build.DropRoot = $env:BUILD_DROPROOT"
   displayName: 'Get Setted variables'
 ```
-3) The "Task Set Build Variables" sets Build.DropRoot variable to the format \\bies-pbi\{sourceBranchName}\{Build.BuildId} 
-   And shows the result in Get Setted Variables(Build.DropRoot)
+3) The Build step "Set Build Variables" sets Build.DropRoot variable to the format \\bies-pbi\{sourceBranchName}\{Build.BuildId} 
+   And shows the result in the other build step "Get Setted Variables" (shows Build.DropRoot environment variable)
