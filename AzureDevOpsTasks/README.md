@@ -40,7 +40,7 @@ There is some output to console which tells what URLs called, some useful checkp
 
 Setting Build variables:
 1) Go to https://dev.azure.com/tauke1/_git/test?path=%2Fazure-pipelines.yml&version=GBmaster
-2) Let's see to part of azure-pipelines.yml code
+2) Let's see the part of azure-pipelines.yml code
 ```
 variables:
   Build.DropRoot : "\\\\bies-pbi"
