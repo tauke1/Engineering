@@ -1,5 +1,5 @@
 #Get function from api folder files.
-$API  = @( Get-ChildItem -Path api\*.ps1 -ErrorAction SilentlyContinue )
+$API  = @( Get-ChildItem -Path api/*.ps1 -ErrorAction SilentlyContinue )
 
 #Dot source the files
 Foreach($import in @($API))
@@ -14,7 +14,7 @@ Foreach($import in @($API))
     }
 }
 
-# stop program on eny error
+# stop program on any error
 $ErrorActionPreference = "Stop"
 
 $currentDate = Get-Date
@@ -29,7 +29,7 @@ foreach($threeDayOldDefinition in $threeDayOldDefinitions) {
 Write-Host "Builds deleted except latest success build for definitions by pattern name *[$threeDaysOldDefinitionPostfix]*"
 
 # format - currentMonth-currentDay with leading zeros
-$postfix = $currentDate.AddDays(-10).ToString("MM.dd")
+$postfix = $currentDate.ToString("MM.dd")
 $newBranchName = "release-$postfix"
 Write-Host "creating branch $newBranchName...."
 # create policy settings to the new branch
