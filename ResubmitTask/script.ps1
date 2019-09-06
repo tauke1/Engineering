@@ -417,7 +417,6 @@ function ResubmitBadBuilds {
         [Parameter(Mandatory = $true)]
         [string]$FixCommitId
     )
-    $buildedPullRequests = New-Object System.Collections.Generic.HashSet[int]
     $foundDefinitions = Get-Definitions -NamePattern $BuildDefinitionName
     if($foundDefinitions.Count -eq 0) {
         throw "Cannot find $buildDefinitionToFind build definition"
