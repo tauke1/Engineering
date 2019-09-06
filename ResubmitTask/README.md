@@ -21,7 +21,7 @@ $buildDefinitionId = "[P][Master][CI]" - name of the definition which we will ru
 The Algorithm
 1) Search definition by name $buildDefinitionId
 2) Search maximum 3-days old builds of current definition, which triggered by Pull Request
-3) In cycle check that the build's pull request are valid by policies of it's branch
+3) In loop check that the build's pull request are valid by policies of it's branch
 4) Check that build status should not be "success" and "canceled"
 5) Check that build sourceCommit should contain bad commit on it's parent commits
 6) Rebuild the build with same parameters and properties, but set properties 

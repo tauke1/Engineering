@@ -4,18 +4,17 @@ $projectID = "d0b80027-2250-45b3-bda4-d9b77d41ab30"
 $apiVersion = "5.1"
 $repositoryId = "e6d2f456-3afc-43e5-ac97-9d571e7fa57d"
 $apiKey = "xe6twlovporcyjzzmuxrooxzqmxq32gw4s36tkfjwtb4jipovz5a"
-$isWriteHostCalledURLs = $false
+$isWriteHostCalledURLs = $true
 #endregion
 
 $badCommit = "e8d1fedefd1d717eac11e0e1c9d927875cd60bc5"
-$sourceBranchName = "refs/heads/master"
 # empty value means that we should take last commit of sourceBrancName
 $sourceCommit = ""
 $commitsTree = @{}
 $buildDefinitionId = "[P][Master][CI]"
+$fixCommit = "3123123"
 # stop program on any error
 $ErrorActionPreference = "Stop"
-ResubmitBadBuilds -BuildDefinitionName $buildDefinitionId -BadCommitId  $badCommit -SourceBranchName $sourceBranchName -SourceCommit $sourceCommit
 
 # # init variables
 # $orgName = "v-mazayt"
@@ -176,7 +175,7 @@ function Get-Builds {
         [Parameter(Mandatory=$false)]
         [Nullable[BuildStatus]]$StatusFilter,
         [Parameter(Mandatory=$false)]
-        [BuildQueryOrder]$QueryOrder = [BuildQueryOrder]::finishTimeDescending,
+        [BuildQueryOrder]$QueryOrder = [BuildQueryOrder]::queueTimeDescending,
         [Parameter(Mandatory=$false)]
         [string[]]$TagFilters = @(),
         [Parameter(Mandatory=$false)]
@@ -271,19 +270,22 @@ $ignorePolicyIds = New-Object System.Collections.Generic.HashSet[string]
 # fa4e907d-c16b-4a4c-9dfa-4916e5d171ab - is a merge type policy, which not block policy validation
 [void]$ignorePolicyIds.Add("fa4e907d-c16b-4a4c-9dfa-4916e5d171ab")
 
-function HasCommitCertainCommit {
+function Build-Commits-Tree {
     param (
         [Parameter(Mandatory = $true)]
         [string]$CommitId,
         [Parameter(Mandatory = $true)]
         [System.Collections.Generic.HashSet[string]]$BadCommitParents,
         [Parameter(Mandatory = $true)]
-        [string]$BadCommit   
+        [string]$BadCommit,   
+        [Parameter(Mandatory = $true)]
+        [string]$FixCommit   
     )
 
     if(!$commitsTree.ContainsKey($CommitId)) {
         $tryCount = 2;
-        while($tryCount > 0) {
+        $commit = $null
+        while($tryCount -gt 0) {
             try {
                 $commit = Get-Commit -CommitId $CommitId
                 break
@@ -297,23 +299,28 @@ function HasCommitCertainCommit {
         $commitsTree[$CommitId] = @{}
         $commitsTree[$CommitId]["parents"] = $commit.parents    
         $commitsTree[$CommitId]["hasBadCommit"] = $false
+        $commitsTree[$CommitId]["hasFixCommit"] = $false
+        if($CommitId -eq $FixCommit) {
+            $res = $commitsTree[$CommitId]["hasFixCommit"] = $true
+        }
         if($CommitId -eq $BadCommit) {
             $res = $commitsTree[$CommitId]["hasBadCommit"] = $true
-            return $true
+            return
         }
         if($badCommitParents.Contains($CommitId)) {
-            return $false
+            return
         }
         if($commit.parents.Count -gt 0) {
             foreach($parent in $commit.parents) {
-                $result = HasCommitCertainCommit -CommitId $parent -BadCommitParents $BadCommitParents -BadCommit $BadCommit
-                if($result) {
-                    $commitsTree[$CommitId]["hasBadCommit"] = $true
-                    return $true
+                Build-Commits-Tree -CommitId $parent -BadCommitParents $BadCommitParents -BadCommit $BadCommit -FixCommit $FixCommit
+                if(!$commitsTree[$CommitId]["hasFixCommit"]) {
+                    $commitsTree[$CommitId]["hasFixCommit"] = $commitsTree[$parent]["hasFixCommit"] 
+                }
+                if(!$commitsTree[$CommitId]["hasBadCommit"]) {
+                    $commitsTree[$CommitId]["hasBadCommit"] = $commitsTree[$parent]["hasBadCommit"] 
                 }
             }
         }
-        return $false
     } else {
         return $commitsTree[$CommitId]["hasBadCommit"]
     }
@@ -325,7 +332,7 @@ function IsPullRequestValid {
         [int]$PullRequestId  
     )
     $tryCount = 2;
-    while($tryCount > 0) {
+    while($tryCount -gt 0) {
         try {
             $evaluations = Get-Policy-Evaluations -PullRequestId $PullRequestId
             break;
@@ -349,6 +356,54 @@ function IsPullRequestValid {
     return $true
 }
 
+function ResubmitBuild {
+    param (
+        [Parameter(Mandatory = $true)]
+        [object]$build,
+        [Parameter(Mandatory = $true)]
+        [string]$FixCommitId,
+        [Parameter(Mandatory = $true)]
+        [string]$BadCommitId,
+        [Parameter(Mandatory = $true)]
+        [System.Collections.Generic.HashSet[string]]$BadCommitParents
+    )
+    if($true -or $build.result -ne "succeeded" -and $build.result -ne "canceled") {
+        Write-Host "Processing the Build $($build.id)"
+        $sameBuildProcessed = $buildedPullRequests.Contains($build.triggerInfo."pr.number")
+        if($sameBuildProcessed) {
+            Write-Host "The same as Build $($build.id) yet built, no need to build this build"
+            continue
+        }
+        $isPullRequestValid = (IsPullRequestValid -PullRequestId $build.triggerInfo."pr.number") 
+        Build-Commits-Tree -CommitId $build.sourceVersion -BadCommit $BadCommitId -BadCommitParents $badCommitParents -FixCommit $FixCommitId
+        if($isPullRequestValid -and $commitsTree[$build.sourceVersion]["hasBadCommit"] -and  !$commitsTree[$build.sourceVersion]["hasFixCommit"]) {
+            $parameters = ConvertFrom-Json $build.parameters
+            $build.id = -1
+            $build.buildNumber = $null
+            $build.orchestrationPlan = $null
+            $build.sourceBranch = $parameters."system.pullRequest.targetBranch"
+            $build.sourceVersion = $SourceCommit
+            $buildedPullRequests.Add($build.triggerInfo."pr.number")
+            $tryCount = 2;
+            while($tryCount -gt 0) {
+                try{ 
+                    [void](Queue-Build -Build $build)
+                    break
+                } catch {
+                    if($tryCount == 1) {
+                        throw $_.Exception
+                    }
+                }
+               [void]$tryCount--
+            }
+            Write-Host "Build $($build.id) are successfully resubmitted"
+        } else {
+            $buildedPullRequests.Add($build.triggerInfo."pr.number")
+            Write-Host "Build $($build.id) are not valid to our conditions"
+        }
+    } 
+}
+
 function ResubmitBadBuilds {
     param (
         # Parameter help description
@@ -357,10 +412,10 @@ function ResubmitBadBuilds {
         # Parameter help description
         [Parameter(Mandatory = $true)]
         [string]$BadCommitId,
-        [Parameter(Mandatory = $true)]
-        [string]$SourceBranchName,
         [Parameter(Mandatory = $false)]
-        [string]$SourceCommit = ""
+        [string]$SourceCommit = "",
+        [Parameter(Mandatory = $true)]
+        [string]$FixCommitId
     )
     $buildedPullRequests = New-Object System.Collections.Generic.HashSet[int]
     $foundDefinitions = Get-Definitions -NamePattern $BuildDefinitionName
@@ -377,42 +432,13 @@ function ResubmitBadBuilds {
     $definition = $foundDefinitions[0]
     $currentTime = Get-Date
     Write-Host "Fetching builds...."
-    $builds = Get-Builds -DefinitionIDs @($definition.id) -ReasonFilter "pullRequest" -minTime $currentTime.Date.AddDays(-2)
+    $builds = Get-Builds -DefinitionIDs @($definition.id) -ReasonFilter "pullRequest" -minTime $currentTime.Date.AddDays(-2) -QueryOrder queueTimeDescending
     Write-Host "$($builds.value.Count) builds are fetched"
     foreach($build in $builds.value) {
-        if($build.status -ne "succeeded" -and $build.status -ne "canceled") {
-            Write-Host "Processing the Build $($build.id)"
-            $sameBuildProcessed = $buildedPullRequests.Contains($build.triggerInfo."pr.number")
-            if($sameBuildProcessed) {
-                Write-Host "The same as Build $($build.id) yet built, no need to build this build"
-                continue
-            }
-            if(!(IsPullRequestValid -PullRequestId $build.triggerInfo."pr.number") -and (HasCommitCertainCommit -CommitId $build.sourceVersion -BadCommit $BadCommitId -BadCommitParents $badCommitParents)) {
-                $build.id = -1
-                $build.buildNumber = $null
-                $build.orchestrationPlan = $null
-                $build.sourceBranch = $SourceBranchName
-                $build.sourceVersion = $SourceCommit
-                $buildedPullRequests.Add($build.triggerInfo."pr.number")
-                $tryCount = 2;
-                while($tryCount > 0) {
-                    try{ 
-                        [void](Queue-Build -Build $build)
-                        break
-                    } catch {
-                        if($tryCount == 1) {
-                            throw $_.Exception
-                        }
-                    }
-                   [void]$tryCount--
-                }
-                Write-Host "Build $($build.id) are successfully resubmitted"
-            } else {
-                $buildedPullRequests.Add($build.triggerInfo."pr.number")
-                Write-Host "Build $($build.id) are not valid to our conditions"
-            }
-        } 
+        ResubmitBuild -build $build -FixCommitId $FixCommitId -BadCommitId $BadCommitId -BadCommitParents $badCommitParents
     }
 }
 #endregion
+
+ResubmitBadBuilds -BuildDefinitionName $buildDefinitionId -BadCommitId  $badCommit -SourceCommit $sourceCommit -FixCommitId $fixCommit
 
