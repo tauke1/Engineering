@@ -16,7 +16,7 @@ $sourceBranchName = "refs/heads/master" - source branch for builds which be resu
 $sourceCommit = "" - source commit for builds which be resubmitted
 $buildDefinitionId = "[P][Master][CI]" - name of the definition which we will run resubmittions of it's builds
 ```
-3) In the region BuildResubmitTask you can change hashset $ignorePolicyIds, which contains policyIds are being ignored in polych validation of pull request
+3) In the region BuildResubmitTask you can change hashset $ignorePolicyIds, which contains policyIds are being ignored in policy validation of pull request
 
 The Algorithm
 1) Search definition by name $buildDefinitionId
