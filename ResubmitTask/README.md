@@ -24,4 +24,8 @@ The Algorithm
 3) In cycle check that the build's pull request are valid by policies of it's branch
 4) Check that build status should not be "success" and "canceled"
 5) Check that build sourceCommit should contain bad commit on it's parent commits
-6) Rebuild the build with same parameters and properties, but set sourceBranch = $sourceBranchName, sourceVersion = $sourceCommit
+6) Rebuild the build with same parameters and properties, but set properties 
+```
+$build.sourceBranch = $sourceBranchName
+$build.sourceVersion = $sourceCommit
+```
