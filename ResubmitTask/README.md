@@ -11,7 +11,7 @@ $isWriteHostCalledURLs = $false - Flag to show which urls are called frok Azure 
 2) And you should set variables for Build Resubmition
 ```
 $badCommit = "e8d1fedefd1d717eac11e0e1c9d927875cd60bc5" - id of bad commit(sha2)
-$sourceBranchName = "refs/heads/master" - source branch for builds which be resubmitted
+$fixCommit = "79d6962e9e81adc30991f5695da13ea1cc4dd049" - id of fix commit(sha2)
 # empty value means that we should take last commit of sourceBrancName
 $sourceCommit = "" - source commit for builds which be resubmitted
 $buildDefinitionId = "[P][Master][CI]" - name of the definition which we will run resubmittions of it's builds
@@ -21,9 +21,9 @@ $buildDefinitionId = "[P][Master][CI]" - name of the definition which we will ru
 The Algorithm
 1) Search definition by name $buildDefinitionId
 2) Search maximum 3-days old builds of current definition, which triggered by Pull Request
-3) In loop check that the build's pull request are valid by policies of it's branch
-4) Check that build status should not be "success" and "canceled"
-5) Check that build sourceCommit should contain bad commit on it's parent commits
+3) In loop check that Check that build status should not be "success" and "canceled" 
+4) Checks the build's pull request are valid by policies of it's branch
+5) Checks is build's commit has bad commit or fix commit. If the commit has bad commit and doesnt have fix commit, then we can continue
 6) Rebuild the build with same parameters and properties, but set properties 
 ```
 $build.sourceBranch = $sourceBranchName

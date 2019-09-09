@@ -367,7 +367,7 @@ function ResubmitBuild {
         [Parameter(Mandatory = $true)]
         [System.Collections.Generic.HashSet[string]]$BadCommitParents
     )
-    if($true -or $build.result -ne "succeeded" -and $build.result -ne "canceled") {
+    if($build.result -ne "succeeded" -and $build.result -ne "canceled") {
         Write-Host "Processing the Build $($build.id)"
         $sameBuildProcessed = $buildedPullRequests.Contains($build.triggerInfo."pr.number")
         if($sameBuildProcessed) {
