@@ -13,6 +13,9 @@ $sourceCommit = ""
 $commitsTree = @{}
 $buildDefinitionId = "[P][Master][CI]"
 $fixCommit = "3123123"
+
+$buildedPullRequests = New-Object System.Collections.Generic.HashSet[string]
+
 # stop program on any error
 $ErrorActionPreference = "Stop"
 
@@ -23,92 +26,6 @@ $ErrorActionPreference = "Stop"
 # $repositoryId = "c5395373-cade-425c-8c47-953aaad51f87"
 # $apiKey = "taenxgjsz4tkzahzibunsk3xbb7evy7kvh6crt2uytsnmzi3lsnq"
 
-#region Enums
-Add-Type -TypeDefinition @"
-   public enum BuildStatus
-   {
-        // All status.
-        all,
-        // The build is cancelling.
-        cancelling,
-        // The build has completed
-        completed,
-        // The build is currently in progress.
-        inProgress,
-        // No status.
-        none,
-        // The build has not yet started.
-        notStarted,
-        // The build is inactive in the queue.
-        postponed
-   }
-"@
-
-Add-Type -TypeDefinition @"
-   public enum BuildResult
-   {
-        // All status
-        all,
-        // The build was canceled before starting
-        canceled,
-        // The build completed unsuccessfully
-        failed,
-        // No result
-        none,
-        // The build completed compilation successfully but had other errors
-        partiallySucceeded,
-        // The build completed successfully
-        succeeded
-   }
-"@
-
-Add-Type -TypeDefinition @"
-   public enum BuildQueryOrder
-   {
-        // Order by finish time descending
-        finishTimeDescending,
-        // Order by finish time ascending
-        finishTimeAscending,
-        // Order by queue time ascending
-        queueTimeAscending,
-        // Order by queue time descending
-        queueTimeDescending,
-        // Order by start time ascending
-        startTimeAscending,
-        // Order by start time descending
-        startTimeDescending
-   }
-"@
-
-Add-Type -TypeDefinition @"
-   public enum BuildReason
-   {
-        // All reasons
-        all,
-        // The build was started for the trigger TriggerType.BatchedContinuousIntegration
-        batchedCI,
-        // The build was started when another build completed
-        buildCompletion,
-        // The build was started for the trigger ContinuousIntegrationType.Gated
-        checkInShelveset,
-        // The build was started for the trigger TriggerType.ContinuousIntegration
-        individualCI,
-        // The build was started manually
-        manual,
-        // No reason. This value should not be used
-        none,
-        // The build was started by a pull request. Added in resource version 3
-        pullRequest,
-        // The build was started for the trigger TriggerType.Schedule
-        schedule,
-        // The build was triggered for retention policy purposes
-        triggered,
-        // The build was created by a user
-        userCreated,
-        // The build was started manually for private validation
-        validateShelveset
-   }
-"@
 #endregion
 
 #region API
@@ -170,16 +87,16 @@ function Get-Builds {
         [int[]]$DefinitionIDs = @(),
         [Parameter(Mandatory=$false)]
         [string]$BranchName,
-        [Parameter(Mandatory=$false)]
-        [BuildResult]$ResultFilter = [BuildResult]::all,
-        [Parameter(Mandatory=$false)]
-        [Nullable[BuildStatus]]$StatusFilter,
-        [Parameter(Mandatory=$false)]
-        [BuildQueryOrder]$QueryOrder = [BuildQueryOrder]::queueTimeDescending,
+        [Parameter(Mandatory=$false)] [ValidateSet("succeeded", "partiallySucceeded", "failed", "canceled", "all")]
+        [string]$ResultFilter = "all",
+        [Parameter(Mandatory=$false)] [ValidateSet("all", "cancelling", "completed", "inProgress", "none", "notStarted", "postponed")]
+        [string]$StatusFilter,
+        [Parameter(Mandatory=$false)] [ValidateSet("finishTimeDescending" , "finishTimeAscending", "queueTimeAscending", "queueTimeDescending", "startTimeAscending", "startTimeDescending")]
+        [string]$QueryOrder = "queueTimeDescending",
         [Parameter(Mandatory=$false)]
         [string[]]$TagFilters = @(),
-        [Parameter(Mandatory=$false)]
-        [BuildReason]$ReasonFilter = [BuildReason]::all,
+        [Parameter(Mandatory=$false)] [ValidateSet("manual", "individualCI", "batchedCI", "schedule", "userCreated", "validateShelveset", "checkInShelveset", "triggered", "all", "pullRequest")]
+        [string]$ReasonFilter = "all",
         [Parameter(Mandatory=$false)]
         [datetime]$minTime,
         [Parameter(Mandatory=$false)]
@@ -188,11 +105,11 @@ function Get-Builds {
     $route = "build/builds"
     $queryParameters = @{
         "definitions" = [string]::Join(",", $DefinitionIDs);
-        "queryOrder" = $QueryOrder.ToString();
+        "queryOrder" = $QueryOrder;
         "branchName" = $BranchName;
         "resultFilter" = $ResultFilter;
         "tagFilters" = [string]::Join(",", $TagFilters);
-        "reasonFilter" = $ReasonFilter.ToString()
+        "reasonFilter" = $ReasonFilter;
     }
     if($minTime -ne $null) {
         $queryParameters["minTime"] = $minTime.ToString("yyyy-MM-dd")
@@ -268,7 +185,7 @@ function Get-Policy-Evaluations {
 #region BuildResubmitTask
 $ignorePolicyIds = New-Object System.Collections.Generic.HashSet[string]
 # fa4e907d-c16b-4a4c-9dfa-4916e5d171ab - is a merge type policy, which not block policy validation
-[void]$ignorePolicyIds.Add("fa4e907d-c16b-4a4c-9dfa-4916e5d171ab")
+$ignorePolicyIds.Add("fa4e907d-c16b-4a4c-9dfa-4916e5d171ab") | Out-Null
 
 function Build-Commits-Tree {
     param (
@@ -294,7 +211,7 @@ function Build-Commits-Tree {
                     throw $_.Exception
                 }
             }
-            [void]$tryCount--
+            $tryCount--
         }
         $commitsTree[$CommitId] = @{}
         $commitsTree[$CommitId]["parents"] = $commit.parents    
@@ -341,7 +258,7 @@ function IsPullRequestValid {
                 throw $_.Exception
             }
         }
-        [void]$tryCount--
+        $tryCount--
     }
     foreach($evaluation in $evaluations.value) {
         # if the policy setting not active or it's in ignore list
@@ -367,41 +284,34 @@ function ResubmitBuild {
         [Parameter(Mandatory = $true)]
         [System.Collections.Generic.HashSet[string]]$BadCommitParents
     )
-    if($build.result -ne "succeeded" -and $build.result -ne "canceled") {
-        Write-Host "Processing the Build $($build.id)"
-        $sameBuildProcessed = $buildedPullRequests.Contains($build.triggerInfo."pr.number")
-        if($sameBuildProcessed) {
-            Write-Host "The same as Build $($build.id) yet built, no need to build this build"
-            continue
-        }
-        $isPullRequestValid = (IsPullRequestValid -PullRequestId $build.triggerInfo."pr.number") 
-        Build-Commits-Tree -CommitId $build.sourceVersion -BadCommit $BadCommitId -BadCommitParents $badCommitParents -FixCommit $FixCommitId
-        if($isPullRequestValid -and $commitsTree[$build.sourceVersion]["hasBadCommit"] -and  !$commitsTree[$build.sourceVersion]["hasFixCommit"]) {
-            $parameters = ConvertFrom-Json $build.parameters
-            $build.id = -1
-            $build.buildNumber = $null
-            $build.orchestrationPlan = $null
-            $build.sourceBranch = $parameters."system.pullRequest.targetBranch"
-            $build.sourceVersion = $SourceCommit
-            $buildedPullRequests.Add($build.triggerInfo."pr.number")
-            $tryCount = 2;
-            while($tryCount -gt 0) {
-                try{ 
-                    [void](Queue-Build -Build $build)
-                    break
-                } catch {
-                    if($tryCount == 1) {
-                        throw $_.Exception
-                    }
+    $isPullRequestValid = (IsPullRequestValid -PullRequestId $build.triggerInfo."pr.number") 
+    Build-Commits-Tree -CommitId $build.sourceVersion -BadCommit $BadCommitId -BadCommitParents $badCommitParents -FixCommit $FixCommitId
+    if($isPullRequestValid -and $commitsTree[$build.sourceVersion]["hasBadCommit"] -and  !$commitsTree[$build.sourceVersion]["hasFixCommit"]) {
+        $parameters = ConvertFrom-Json $build.parameters
+        $build.id = -1
+        $build.buildNumber = $null
+        $build.orchestrationPlan = $null
+        $build.sourceBranch = $parameters."system.pullRequest.targetBranch"
+        $build.sourceVersion = $SourceCommit
+        $buildedPullRequests.Add($build.triggerInfo."pr.number")
+        $tryCount = 2;
+        while($tryCount -gt 0) {
+            try
+            { 
+                (Queue-Build -Build $build) | Out-Null
+                break
+            } catch {
+                if($tryCount == 1) {
+                    throw $_.Exception
                 }
-               [void]$tryCount--
             }
-            Write-Host "Build $($build.id) are successfully resubmitted"
-        } else {
-            $buildedPullRequests.Add($build.triggerInfo."pr.number")
-            Write-Host "Build $($build.id) are not valid to our conditions"
+            $tryCount--
         }
-    } 
+        Write-Host "Build $($build.id) are successfully resubmitted"
+    } else {
+        $buildedPullRequests.Add($build.triggerInfo."pr.number")
+        Write-Host "Build $($build.id) are not valid to our conditions"
+    }
 }
 
 function ResubmitBadBuilds {
@@ -426,15 +336,33 @@ function ResubmitBadBuilds {
     Write-Host "Bad commit $BadCommitId is found"
     $badCommitParents = New-Object System.Collections.Generic.HashSet[string]
     foreach($parent in $badCommit.parents) {
-        [void]$badCommitParents.Add($parent)
+        $badCommitParents.Add($parent) | Out-Null
     }
     $definition = $foundDefinitions[0]
     $currentTime = Get-Date
     Write-Host "Fetching builds...."
-    $builds = Get-Builds -DefinitionIDs @($definition.id) -ReasonFilter "pullRequest" -minTime $currentTime.Date.AddDays(-2) -QueryOrder queueTimeDescending
+    $builds = Get-Builds -DefinitionIDs @($definition.id) -ReasonFilter "all" -minTime $currentTime.Date.AddDays(-2) -QueryOrder queueTimeDescending
     Write-Host "$($builds.value.Count) builds are fetched"
-    foreach($build in $builds.value) {
-        ResubmitBuild -build $build -FixCommitId $FixCommitId -BadCommitId $BadCommitId -BadCommitParents $badCommitParents
+    
+    # iterate build from oldest builds
+    for($i = $builds.value.Count - 1; $i -ge 0; $i--)
+    {
+        $build = $builds.value[$i]
+        if(($build.status -ne "cancelling" -and $build.status -ne "completed") -or $build.result -eq "failed")
+        {         
+            $sameBuildProcessed = $buildedPullRequests.Contains($build.triggerInfo."pr.number")
+            if($sameBuildProcessed) 
+            {
+                Write-Host "The same Build as $($build.id) build yet built, no need to rebuild this build"
+                continue
+            }
+            Write-Host "Processing the Build $($build.id)"
+            ResubmitBuild -build $build -FixCommitId $FixCommitId -BadCommitId $BadCommitId -BadCommitParents $badCommitParents
+        }
+        else 
+        {
+            Write-Host "Build $($build.id) is $($build.status)"   
+        }
     }
 }
 #endregion
