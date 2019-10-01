@@ -341,7 +341,7 @@ function ResubmitBadBuilds {
     $definition = $foundDefinitions[0]
     $currentTime = Get-Date
     Write-Host "Fetching builds...."
-    $builds = Get-Builds -DefinitionIDs @($definition.id) -ReasonFilter "all" -minTime $currentTime.Date.AddDays(-2) -QueryOrder queueTimeDescending
+    $builds = Get-Builds -DefinitionIDs @($definition.id) -ReasonFilter "pullRequest" -minTime $currentTime.Date.AddDays(-2) -QueryOrder queueTimeDescending
     Write-Host "$($builds.value.Count) builds are fetched"
     
     # iterate build from oldest builds
