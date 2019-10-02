@@ -7,7 +7,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string] $projectID,
     [Parameter(Mandatory = $true)]
-    [string] $buildDefinitionId,
+    [string] $buildDefinitionName,
     [Parameter(Mandatory = $true)]
     [string] $repositoryId,
     [Parameter(Mandatory = $true)]
@@ -396,5 +396,5 @@ function ResubmitBadBuilds {
 }
 #endregion
 
-ResubmitBadBuilds -BuildDefinitionName $buildDefinitionId -BadCommitId  $badCommit -SourceCommit $sourceCommit -FixCommitId $fixCommit
+ResubmitBadBuilds -BuildDefinitionName $buildDefinitioName -BadCommitId  $badCommit -SourceCommit $sourceCommit -FixCommitId $fixCommit
 
