@@ -100,11 +100,11 @@ function Get-Builds {
         [Parameter(Mandatory=$false)]
         [string]$BranchName,
         [Parameter(Mandatory=$false)] [ValidateSet("succeeded", "partiallySucceeded", "failed", "canceled", "all")]
-        [string]$ResultFilter = "all",
-        [Parameter(Mandatory=$false)] [ValidateSet("all", "cancelling", "completed", "inProgress", "none", "notStarted", "postponed")]
+        [string]$ResultFilter,
+        [Parameter(Mandatory=$false)]
         [string]$StatusFilter,
         [Parameter(Mandatory=$false)] [ValidateSet("finishTimeDescending" , "finishTimeAscending", "queueTimeAscending", "queueTimeDescending", "startTimeAscending", "startTimeDescending")]
-        [string]$QueryOrder = "queueTimeDescending",
+        [string]$QueryOrder,
         [Parameter(Mandatory=$false)]
         [string[]]$TagFilters = @(),
         [Parameter(Mandatory=$false)] [ValidateSet("manual", "individualCI", "batchedCI", "schedule", "userCreated", "validateShelveset", "checkInShelveset", "triggered", "all", "pullRequest")]
@@ -112,17 +112,24 @@ function Get-Builds {
         [Parameter(Mandatory=$false)]
         [datetime]$minTime,
         [Parameter(Mandatory=$false)]
-        [datetime]$maxTime
+        [datetime]$maxTime,
+        [int]$top
     )
     $route = "build/builds"
     $queryParameters = @{
         "definitions" = [string]::Join(",", $DefinitionIDs);
-        "queryOrder" = $QueryOrder;
         "branchName" = $BranchName;
         "resultFilter" = $ResultFilter;
         "tagFilters" = [string]::Join(",", $TagFilters);
         "reasonFilter" = $ReasonFilter;
     }
+    if(![string]::IsNullOrEmpty($QueryOrder))
+    {
+        $queryParameters["queryOrder"] =  $QueryOrder
+    }
+    if($top -gt 0) {
+        $queryParameters['$top'] = $top
+    } 
     if($minTime -ne $null) {
         $queryParameters["minTime"] = $minTime.ToString("yyyy-MM-dd")
     } 
@@ -363,38 +370,39 @@ function ResubmitBadBuilds {
     $definition = $foundDefinitions[0]
     $currentTime = Get-Date
     Write-Host "Fetching builds...."
-    $builds = Get-Builds -DefinitionIDs @($definition.id) -ReasonFilter "pullRequest" -minTime $currentTime.Date.AddDays(-2) -QueryOrder queueTimeDescending
+    $inProgressAndNotStartedBuilds = Get-Builds -StatusFilter "inProgress,NotStarted" -DefinitionIDs @($definition.id) -ReasonFilter "pullRequest" #-QueryOrder queueTimeDescending
+    $failedbuilds = Get-Builds -ResultFilter Failed -StatusFilter completed -DefinitionIDs @($definition.id) -ReasonFilter "pullRequest" -minTime $currentTime.Date.AddDays(-200) #-QueryOrder finishTimeDescending
+    
+    $builds = $failedbuilds.value + $inProgressAndNotStartedBuilds.value
+
     Write-Host "$($builds.value.Count) builds are fetched"
     
     # iterate build from oldest builds
-    for($i = $builds.value.Count - 1; $i -ge 0; $i--)
+    for($i = $builds.Count - 1; $i -ge 0; $i--)
     {
-        $build = $builds.value[$i]
-        if(($build.status -ne "cancelling" -and $build.status -ne "completed") -or $build.result -eq "failed")
-        {         
-            $isPullRequestValid = (IsPullRequestValid -PullRequestId $build.triggerInfo."pr.number") 
-            Build-Commits-Tree -CommitId $build.sourceVersion -BadCommit $BadCommitId -BadCommitParents $badCommitParents -FixCommit $FixCommitId
+        $build = $builds[$i]         
+        $isPullRequestValid = (IsPullRequestValid -PullRequestId $build.triggerInfo."pr.number") 
+        Build-Commits-Tree -CommitId $build.sourceVersion -BadCommit $BadCommitId -BadCommitParents $badCommitParents -FixCommit $FixCommitId
 
-            if($isPullRequestValid -and $commitsTree[$build.sourceVersion]["hasBadCommit"] -and  !$commitsTree[$build.sourceVersion]["hasFixCommit"]) 
+        if($isPullRequestValid -and $commitsTree[$build.sourceVersion]["hasBadCommit"] -and  !$commitsTree[$build.sourceVersion]["hasFixCommit"]) 
+        {
+            Write-Host "Processing the Build $($build.id) with status $($build.status) and result $($build.result)"
+            if($build.status -ne "completed")
             {
-                Write-Host "Processing the Build $($build.id) with status $($build.status) and result $($build.result)"
-                if($build.status -ne "completed")
-                {
-                    Write-Host "Canceling build $($build.id)"
-                    Cancel-Build -BuildId $build.id | Out-Null
-                }
-                $sameBuildProcessed = $buildedPullRequests.Contains($build.triggerInfo."pr.number")
-                if($sameBuildProcessed) 
-                {
-                    Write-Host "The same Build as $($build.id) build yet built, no need to rebuild this build"
-                    continue
-                }
-                ResubmitBuild -build $build -FixCommitId $FixCommitId -BadCommitId $BadCommitId -BadCommitParents $badCommitParents
+                Write-Host "Canceling build $($build.id)"
+                Cancel-Build -BuildId $build.id | Out-Null
             }
+            $sameBuildProcessed = $buildedPullRequests.Contains($build.triggerInfo."pr.number")
+            if($sameBuildProcessed) 
+            {
+                Write-Host "The same Build as $($build.id) build yet built, no need to rebuild this build"
+                continue
+            }
+            ResubmitBuild -build $build -FixCommitId $FixCommitId -BadCommitId $BadCommitId -BadCommitParents $badCommitParents
         }
     }
 }
 #endregion
 
-ResubmitBadBuilds -BuildDefinitionName $buildDefinitioName -BadCommitId  $badCommit -SourceCommit $sourceCommit -FixCommitId $fixCommit
+ResubmitBadBuilds -BuildDefinitionName $buildDefinitionName -BadCommitId  $badCommit -SourceCommit $sourceCommit -FixCommitId $fixCommit
 
