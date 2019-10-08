@@ -371,9 +371,9 @@ function ResubmitBadBuilds {
     $currentTime = Get-Date
     Write-Host "Fetching builds...."
     $inProgressAndNotStartedBuilds = Get-Builds -StatusFilter "inProgress,NotStarted" -DefinitionIDs @($definition.id) -ReasonFilter "pullRequest" #-QueryOrder queueTimeDescending
-    $failedbuilds = Get-Builds -ResultFilter Failed -StatusFilter completed -DefinitionIDs @($definition.id) -ReasonFilter "pullRequest" -minTime $currentTime.Date.AddDays(-200) #-QueryOrder finishTimeDescending
+    $failedbuilds = Get-Builds -ResultFilter Failed -StatusFilter completed -DefinitionIDs @($definition.id) -ReasonFilter "pullRequest" -minTime $currentTime.Date.AddDays(-2) #-QueryOrder finishTimeDescending
     
-    $builds = $failedbuilds.value + $inProgressAndNotStartedBuilds.value
+    $builds = $inProgressAndNotStartedBuilds.value + $failedbuilds.value
 
     Write-Host "$($builds.value.Count) builds are fetched"
     
